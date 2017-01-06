@@ -3,6 +3,9 @@
 #include <string.h>
 #include <malloc.h>
 
+#define CURRENT_PROCESS 0xFFFF9004
+#define PROCESS_PID_OFFSET(is_new) ((is_new) ? 0xBC : 0xB4)
+
 #define FCRAM(x)   (void *)((kver < SYSTEM_VERSION(2, 44, 6)) ? (0xF0000000 + x) : (0xE0000000 + x)) //0x20000000
 #define AXIWRAM(x) (void *)((kver < SYSTEM_VERSION(2, 44, 6)) ? (0xEFF00000 + x) : (0xDFF00000 + x)) //0x1FF00000
 #define KMEMORY    ((u32 *)AXIWRAM(0xF4000))                                                         //0x1FFF4000
@@ -65,12 +68,63 @@ u32 FileRead(void *buffer, const char *filename, u32 maxsize){ //lol
 	return size;
 }
 
+static bool *kernel_patch_args;
+static u32 kernel_patch_ret;
+static s32 kernel_pid_orig;
+
+static void kernel_patch_pid() {
+	__asm__ volatile("cpsid aif");
+	bool is_new = *kernel_patch_args;
+	kernel_patch_ret = 0;
+
+	u32 *pid = *(u32**)(CURRENT_PROCESS) + (is_new ? 0x2F : 0x2D);
+	kernel_pid_orig = *pid;
+	*pid = 0;
+
+	kernel_patch_ret = 1;
+}
+
+static void kernel_restore_pid() {
+	__asm__ volatile("cpsid aif");
+	bool is_new = *kernel_patch_args;
+	kernel_patch_ret = 0;
+
+	u32 *pid = *(u32**)(CURRENT_PROCESS) + (is_new ? 0x2F : 0x2D);
+	*pid = kernel_pid_orig;
+
+	kernel_patch_ret = 1;
+}
+
+/* Copy from waithax & svchax */
+bool elevate_system_privilege() {
+	bool is_new = osGetKernelVersion();
+	kernel_patch_args = &is_new;
+
+	svcBackdoor((s32(*)(void)) & kernel_patch_pid);
+
+	if (!kernel_patch_ret) {
+		return false;
+	}
+
+	srvExit();
+	srvInit();
+
+	svcBackdoor((s32(*)(void)) & kernel_restore_pid);
+
+	return true;
+}
+
 int main(int argc, char **argv){
 	gfxInitDefault();
 	fsInit();
 	aptInit();
 	sdmcInit();
 	romfsInit();
+    
+	consoleInit(GFX_TOP, NULL);
+
+	PANIC(!elevate_system_privilege(), "FAILED TO ELEVATE SYSTEM PRIVILEGE!");
+
 	PANIC(pmInit(), "PM INIT FAILED!");
 	
 	hidScanInput();
@@ -112,7 +166,6 @@ int main(int argc, char **argv){
 	PANIC(backdoor_res, "FAILED TO PATCH THE KERNEL!");
 	
 	/* Launch SAFE_MODE ARM9 */
-	
 	DEBUG("Launching SAFE_MODE ARM9...");
 	pm_res = PM_LaunchFIRMSetParams(3, 0, NULL);
 	
