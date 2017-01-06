@@ -69,7 +69,7 @@ u32 FileRead(void *buffer, const char *filename, u32 maxsize){ //lol
 }
 
 static bool *kernel_patch_args;
-static u32 kernel_patch_ret;
+static u32 kernel_patch_ret = 0;
 static s32 kernel_pid_orig;
 
 static void kernel_patch_pid() {
@@ -95,8 +95,17 @@ static void kernel_restore_pid() {
 	kernel_patch_ret = 1;
 }
 
+static void kernel_check_backdoor() {
+	kernel_patch_ret = 1;
+}
+
 /* Copy from waithax & svchax */
 bool elevate_system_privilege() {
+	svcGlobalBackdoor((s32(*)(void)) & kernel_check_backdoor);
+	if (!kernel_patch_ret) {
+		return false;
+	}
+
 	bool is_new = osGetKernelVersion();
 	kernel_patch_args = &is_new;
 
@@ -121,8 +130,6 @@ int main(int argc, char **argv){
 	sdmcInit();
 	romfsInit();
     
-	consoleInit(GFX_TOP, NULL);
-
 	PANIC(!elevate_system_privilege(), "FAILED TO ELEVATE SYSTEM PRIVILEGE!");
 
 	PANIC(pmInit(), "PM INIT FAILED!");
