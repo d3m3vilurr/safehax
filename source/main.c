@@ -122,9 +122,13 @@ int main(int argc, char **argv){
 	PANIC(backdoor_res, "FAILED TO PATCH THE KERNEL!");
 	
 	/* Relaunch Firmware */ //This will clear the global flag preventing SAFE_MODE launch.
-	
-	DEBUG("Reloading firmware...");
-	pm_res = PM_LaunchFIRMSetParams(2, 0, NULL);
+	if (kver < SYSTEM_VERSION(2, 53, 0)) {
+		DEBUG("Launching SAFE_MODE ARM9...");
+		pm_res = PM_LaunchFIRMSetParams(3, 0, NULL);
+	} else {
+		DEBUG("Reloading firmware...");
+		pm_res = PM_LaunchFIRMSetParams(2, 0, NULL);
+	}
 	
 exit:
 	if (pm_res){
